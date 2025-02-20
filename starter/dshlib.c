@@ -51,21 +51,96 @@
  *  Standard Library Functions You Might Want To Consider Using (assignment 2+)
  *      fork(), execvp(), exit(), chdir()
  */
-int exec_local_cmd_loop()
-{
-    char *cmd_buff;
-    int rc = 0;
+
+// Function to change directory
+int change_directory(cmd_buff_t *cmd) {
+    if (cmd->argc == 1) {
+        // No arguments, do nothing
+        return OK;
+    } else if (cmd->argc == 2) {
+        // Change directory to the specified path
+        if (chdir(cmd->argv[1]) != 0) {
+            perror("cd");
+            return ERR_EXEC_CMD;
+        }
+    }
+    return OK;
+}
+
+// Function to parse input into cmd_buff_t
+int build_cmd_buff(char *cmd_line, cmd_buff_t *cmd_buff) {
+    // Trim leading and trailing spaces
+    while (isspace((unsigned char)*cmd_line)) cmd_line++;
+    char *end = cmd_line + strlen(cmd_line) - 1;
+    while (end > cmd_line && isspace((unsigned char)*end)) end--;
+    *(end + 1) = '\0';
+
+    // Initialize cmd_buff
+    cmd_buff->argc = 0;
+    cmd_buff->_cmd_buffer = strdup(cmd_line);
+    if (!cmd_buff->_cmd_buffer) return ERR_MEMORY;
+
+    // Tokenize the command line
+    char *token = strtok(cmd_buff->_cmd_buffer, " ");
+    while (token != NULL && cmd_buff->argc < CMD_ARGV_MAX - 1) {
+        cmd_buff->argv[cmd_buff->argc++] = token;
+        token = strtok(NULL, " ");
+    }
+    cmd_buff->argv[cmd_buff->argc] = NULL;
+
+    return OK;
+}
+
+// Main command loop
+int exec_local_cmd_loop() {
+    char cmd_line[SH_CMD_MAX];
     cmd_buff_t cmd;
+    int rc = 0;
 
-    // TODO IMPLEMENT MAIN LOOP
+    while (1) {
+        printf("%s", SH_PROMPT);
+        if (fgets(cmd_line, SH_CMD_MAX, stdin) == NULL) {
+            printf("\n");
+            break;
+        }
+        cmd_line[strcspn(cmd_line, "\n")] = '\0';
 
-    // TODO IMPLEMENT parsing input to cmd_buff_t *cmd_buff
+        if (strcmp(cmd_line, EXIT_CMD) == 0) {
+            exit(OK);
+        }
 
-    // TODO IMPLEMENT if built-in command, execute builtin logic for exit, cd (extra credit: dragon)
-    // the cd command should chdir to the provided directory; if no directory is provided, do nothing
+        rc = build_cmd_buff(cmd_line, &cmd);
+        if (rc != OK) {
+            fprintf(stderr, "Error parsing command\n");
+            continue;
+        }
 
-    // TODO IMPLEMENT if not built-in command, fork/exec as an external command
-    // for example, if the user input is "ls -l", you would fork/exec the command "ls" with the arg "-l"
+        Built_In_Cmds cmd_type = match_command(cmd.argv[0]);
+        if (cmd_type == BI_CMD_CD) {
+            change_directory(&cmd);
+        } else if (cmd_type == BI_NOT_BI) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child process
+                if (execvp(cmd.argv[0], cmd.argv) == -1) {
+                    perror("execvp");
+                    exit(ERR_EXEC_CMD);
+                }
+            } else if (pid < 0) {
+                // Fork failed
+                perror("fork");
+            } else {
+                // Parent process
+                int status;
+                waitpid(pid, &status, 0);
+                if (WIFEXITED(status)) {
+                    rc = WEXITSTATUS(status);
+                }
+            }
+        }
+
+        free(cmd._cmd_buffer);
+    }
 
     return OK;
 }
